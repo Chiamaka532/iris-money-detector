@@ -1,59 +1,50 @@
 import pandas as pd
-import numpy as np
+
+def _empty_result():
+    return {'data': pd.DataFrame(), 'savings': pd.Series(dtype='float64')}
 
 def run_duplicate_engine(df):
-    """Finds exact duplicate payments: Same Vendor + Same Amount + Same Date"""
+    if df.empty: return _empty_result()
     dup_mask = df.duplicated(subset=['Vendor_Name', 'Amount', 'Date'], keep=False)
     dupes = df[dup_mask].copy()
-    
-    # THE FIX: Calculate savings
     if len(dupes) > 0:
-        dupes['savings'] = dupes['Amount']  # Assume 100% recovery on duplicates
+        dupes['savings'] = pd.to_numeric(dupes['Amount'], errors='coerce').fillna(0)
         dupes['reason'] = 'Duplicate Payment'
-    else:
-        dupes['savings'] = 0
-    
-    return {'data': dupes, 'savings': dupes['savings']}
+        return {'data': dupes, 'savings': dupes['savings']}
+    return _empty_result()
 
 def run_price_engine(df):
-    """Finds price spikes: >10% increase vs last payment to same vendor"""
+    if df.empty: return _empty_result()
+    df = df.copy()
+    df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
     df = df.sort_values(['Vendor_Name', 'Date'])
     df['prev_amount'] = df.groupby('Vendor_Name')['Amount'].shift(1)
-    df['pct_change'] = (df['Amount'] - df['prev_amount']) / df['prev_amount']
-    
+    df['pct_change'] = (df['Amount'] - df['prev_amount']) / df['prev_amount'].replace(0, 1)
     spikes = df[df['pct_change'] > 0.10].copy()
-    
-    # THE FIX: Calculate savings
     if len(spikes) > 0:
-        spikes['savings'] = spikes['Amount'] - spikes['prev_amount'] # The overpay amount
+        spikes['savings'] = spikes['Amount'] - spikes['prev_amount'].fillna(0)
         spikes['reason'] = 'Price Spike >10%'
-    else:
-        spikes['savings'] = 0
-    
-    return {'data': spikes, 'savings': spikes['savings']}
+        return {'data': spikes, 'savings': spikes['savings']}
+    return _empty_result()
 
 def run_saas_engine(df):
-    """Finds SaaS waste: Subscriptions that could be consolidated/cancelled"""
-    saas_df = df[df['Category'].str.contains('SaaS|Software', case=False, na=False)].copy()
-    
-    # THE FIX: Assume 25% savings on SaaS
+    if df.empty: return _empty_result()
+    df = df.copy()
+    df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
+    saas_df = df[df['Category'].astype(str).str.contains('SaaS|Software', case=False, na=False)].copy()
     if len(saas_df) > 0:
         saas_df['savings'] = saas_df['Amount'] * 0.25
         saas_df['reason'] = 'Potential SaaS Consolidation'
-    else:
-        saas_df['savings'] = 0
-    
-    return {'data': saas_df, 'savings': saas_df['savings']}
+        return {'data': saas_df, 'savings': saas_df['savings']}
+    return _empty_result()
 
 def run_offcontract_engine(df):
-    """Finds off-contract spend: No Contract ID"""
-    off_df = df[(df['Contract_ID'] == "") | (df['Contract_ID'].isna())].copy()
-    
-    # THE FIX: Assume 15% savings by putting on contract
+    if df.empty: return _empty_result()
+    df = df.copy()
+    df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
+    off_df = df[(df['Contract_ID'].astype(str) == "") | (df['Contract_ID'].isna())].copy()
     if len(off_df) > 0:
         off_df['savings'] = off_df['Amount'] * 0.15
         off_df['reason'] = 'Off-Contract Spend'
-    else:
-        off_df['savings'] = 0
-    
-    return {'data': off_df, 'savings': off_df['savings']}
+        return {'data': off_df, 'savings': off_df['savings']}
+    return _empty_result()
