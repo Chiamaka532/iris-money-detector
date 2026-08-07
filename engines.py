@@ -5,10 +5,12 @@ def _empty_result():
 
 def run_duplicate_engine(df):
     if df.empty: return _empty_result()
+    df = df.copy()
+    df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
     dup_mask = df.duplicated(subset=['Vendor_Name', 'Amount', 'Date'], keep=False)
     dupes = df[dup_mask].copy()
     if len(dupes) > 0:
-        dupes['savings'] = pd.to_numeric(dupes['Amount'], errors='coerce').fillna(0)
+        dupes['savings'] = dupes['Amount']
         dupes['reason'] = 'Duplicate Payment'
         return {'data': dupes, 'savings': dupes['savings']}
     return _empty_result()
@@ -31,7 +33,7 @@ def run_saas_engine(df):
     if df.empty: return _empty_result()
     df = df.copy()
     df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
-    saas_df = df[df['Category'].astype(str).str.contains('SaaS|Software', case=False, na=False)].copy()
+    saas_df = df[df['Category'].astype(str).str.contains('SaaS|Software|License|Subscription', case=False, na=False)].copy()
     if len(saas_df) > 0:
         saas_df['savings'] = saas_df['Amount'] * 0.25
         saas_df['reason'] = 'Potential SaaS Consolidation'
@@ -42,7 +44,8 @@ def run_offcontract_engine(df):
     if df.empty: return _empty_result()
     df = df.copy()
     df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
-    off_df = df[(df['Contract_ID'].astype(str) == "") | (df['Contract_ID'].isna())].copy()
+    # FIX: Check for both empty and "No Contract"
+    off_df = df[(df['Contract_ID'].astype(str).isin(["", "No Contract", "nan"]))].copy()
     if len(off_df) > 0:
         off_df['savings'] = off_df['Amount'] * 0.15
         off_df['reason'] = 'Off-Contract Spend'
