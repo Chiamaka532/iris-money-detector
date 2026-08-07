@@ -1,11 +1,17 @@
 import pandas as pd
 import numpy as np
 
+
 def run_duplicate_engine(df):
-    """FIND 1: Duplicate Invoice Payments. 0.5-1% leakage"""
-    dupes = df[df.duplicated(subset=['Vendor_Name', 'Amount', 'Date'], keep=False)].copy()
-    dupes['Potential_Savings'] = dupes['Amount']
-    return {'data': dupes, 'savings': dupes['Potential_Savings']}
+     """FIND 1: Duplicate Invoice Payments. 0.5-1% leakage"""
+     st.write("DEBUG: Columns in your file:", df.columns.tolist()) # <-- ADD THIS
+     st.stop() # <-- ADD THIS to pause
+    
+     dupes = df[df.duplicated(subset=['Vendor_Name', 'Amount', 'Date'], keep=False)]
+     ...
+     dupes = df[df.duplicated(subset=['Vendor_Name', 'Amount', 'Date'], keep=False)].copy()
+     dupes['Potential_Savings'] = dupes['Amount']
+     return {'data': dupes, 'savings': dupes['Potential_Savings']}
 
 def run_price_engine(df):
     """FIND 2: Price Variance vs Median. 1-3% leakage"""
