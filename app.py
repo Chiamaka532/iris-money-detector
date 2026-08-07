@@ -51,7 +51,8 @@ with st.sidebar:
                 df['Contract_ID'] = df['Contract_ID'].astype(str).fillna("")
 
                 # Add missing columns if they really dont exist
-                for col in ['Date', 'Vendor_Name', 'Amount', 'Category', 'Contract_ID']:
+                required_cols = ['Date', 'Vendor_Name', 'Amount', 'Category', 'Contract_ID']
+                for col in required_cols:
                     if col not in df.columns:
                         if col == 'Amount':
                             df[col] = 0
