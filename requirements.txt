@@ -5,3 +5,4 @@ openpyxl
 Pillow
 fpdf2
 plotly
+difflib
