@@ -26,7 +26,7 @@ with st.sidebar:
 
     elif upload_method == "Upload Excel/CSV/Zip":
      file = st.file_uploader("Drop GL + Vendor + Contract Files", type=['csv', 'xlsx', 'zip'])
-    if file:
+    if file: # <-- This MUST be indented under the line above
         try:
             if file.name.endswith('.csv'):
                 df = pd.read_csv(file)
