@@ -25,34 +25,40 @@ with st.sidebar:
         df = load_sample_data()
 
     elif upload_method == "Upload Excel/CSV/Zip":
-        file = st.file_uploader("Drop GL + Vendor + Contract Files", type=['csv', 'xlsx', 'zip'])
-        if file:
-            try:
-                if file.name.endswith('.csv'):
-                    df = pd.read_csv(file)
-                else:
-                    df = pd.read_excel(file)
+     file = st.file_uploader("Drop GL + Vendor + Contract Files", type=['csv', 'xlsx', 'zip'])
+    if file:
+        try:
+            if file.name.endswith('.csv'):
+                df = pd.read_csv(file)
+            else:
+                df = pd.read_excel(file)
 
-                # AUTO-FIX COLUMNS
-                df.columns = df.columns.str.strip().str.lower()
-                df = df.rename(columns={
-                    'date': 'Date', 'invoice date': 'Date',
-                    'vendor': 'Vendor_Name', 'vendor_name': 'Vendor_Name', 'supplier': 'Vendor_Name',
-                    'amount': 'Amount', 'total': 'Amount', 'total amount': 'Amount', 'cost': 'Amount',
-                    'category': 'Category', 'class': 'Category', 'department': 'Category',
-                    'contract id': 'Contract_ID', 'contract_id': 'Contract_ID'
-                })
+            # AUTO-FIX COLUMNS
+            df.columns = df.columns.str.strip().str.lower()
+            df = df.rename(columns={
+                'date': 'Date', 'invoice date': 'Date',
+                'vendor': 'Vendor_Name', 'vendor_name': 'Vendor_Name', 'supplier': 'Vendor_Name',
+                'amount': 'Amount', 'total': 'Amount', 'total amount': 'Amount', 'cost': 'Amount',
+                'category': 'Category', 'class': 'Category', 'department': 'Category',
+                'contract id': 'Contract_ID', 'contract_id': 'Contract_ID'
+            })
 
-                for col in ['Date', 'Vendor_Name', 'Amount', 'Category']:
-                    if col not in df.columns:
-                        df[col] = "" if col!= 'Amount' else 0
-                if 'Contract_ID' not in df.columns:
-                    df['Contract_ID'] = ""
+            # NUKE: FORCE TYPES. THIS IS THE FIX
+            df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
+            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+            df['Vendor_Name'] = df['Vendor_Name'].astype(str).fillna("Unknown")
+            df['Category'] = df['Category'].astype(str).fillna("Other")
+            df['Contract_ID'] = df['Contract_ID'].astype(str).fillna("")
 
-                st.success(f"✅ Data Loaded: {len(df)} rows")
+            # Add missing columns if they really dont exist
+            for col in ['Date', 'Vendor_Name', 'Amount', 'Category', 'Contract_ID']:
+                if col not in df.columns:
+                    df[col] = 0 if col == 'Amount' else ""
 
-            except Exception as e:
-                st.error(f"❌ Error loading file: {e}")
+            st.success(f"✅ Data Loaded: {len(df)} rows | Amount is now: {df['Amount'].dtype}")
+
+        except Exception as e:
+            st.error(f"❌ Error loading file: {e}")
 
     elif upload_method == "Connect QuickBooks":
         if "qb_token" not in st.session_state:
