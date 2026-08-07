@@ -1,122 +1,97 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
-import numpy as np
-from datetime import datetime
+from engines import run_duplicate_engine, run_price_engine, run_saas_engine, run_offcontract_engine
+from connectors import get_qb_auth_url, get_qb_tokens, fetch_qb_transactions
+from utils import load_sample_data, generate_pdf_report
 
-st.set_page_config(page_title="IRIS Ultimate Detective", layout="wide")
-st.title("🕵️ IRIS - Ultimate Money Detective Pro")
-st.write("Finds: Fraud Spikes, Duplicates, Overpay, Zombie SaaS, Off-Contract, Money Leaks")
+st.set_page_config(page_title="IRIS PRO", layout="wide", initial_sidebar_state="expanded")
 
-st.sidebar.header("Upload Data")
-uploaded_file = st.sidebar.file_uploader("Upload AP/Procurement/Sales CSV or Excel", type=["csv", "xlsx", "xls"])
+# Load custom theme
+with open(".streamlit/config.toml") as f:
+    pass # theme loads automatically
 
-conn = sqlite3.connect("iris_data.db")
+st.title("IRIS PRO: PE Spend Leakage Command Center")
+st.caption("Autonomous AI that finds 2-7% of portfolio company spend in 48 hours")
 
-if uploaded_file is not None:
-    if uploaded_file.name.endswith('.csv'):
-        df = pd.read_csv(uploaded_file)
-    else:
-        df = pd.read_excel(uploaded_file)
+if 'df' not in st.session_state:
+    st.session_state.df = load_sample_data()
+if 'results' not in st.session_state:
+    st.session_state.results = None
 
-    df.columns = [col.strip() for col in df.columns]
-    for col in df.columns:
-        if 'date' in col.lower():
-            df[col] = pd.to_datetime(df[col], errors='coerce')
+with st.sidebar:
+    st.header("1. Data Intake")
+    upload_method = st.selectbox("Upload Method", ["Demo Mode", "Upload Money Image", "Upload Excel/CSV/Zip", "Connect QuickBooks"])
 
-    df.to_sql("all_data", conn, if_exists='replace', index=False)
-    st.success(f"Loaded: {len(df)} rows")
+    if upload_method == "Demo Mode":
+        st.info("Using sample data")
 
-    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Data",
-        "🚨 Fraud & Spikes",
-        "💸 Money Leaks",
-        "1. Duplicate Invoices",
-        "2. Over Contract",
-        "3. Zombie + Off-Contract"
-    ])
-
-    with tab1:
-        st.dataframe(df, use_container_width=True)
-
-    # TAB 2: FRAUD & SPIKES - WE KEPT THIS
-    with tab2:
-        st.subheader("🚨 FRAUD & PRICE SPIKE DETECTION")
-        if numeric_cols:
-            for col in numeric_cols[:3]:
-                mean = df[col].mean()
-                std = df[col].std()
-                if std > 0:
-                    threshold = mean + 3*std
-                    anomalies = df[df[col] > threshold]
-                    if not anomalies.empty:
-                        st.error(f"**{len(anomalies)} Suspicious Spikes in `{col}`** > 3x normal")
-                        st.dataframe(anomalies, use_container_width=True)
-                    else:
-                        st.success(f"No major spikes in `{col}`")
+    elif upload_method == "Upload Excel/CSV/Zip":
+        file = st.file_uploader("Drop GL + Vendor + Contract Files", type=['csv', 'xlsx', 'zip'])
+        
+        if file: 
+            if file.name.endswith('.csv'): st.session_state.df = pd.read_csv(file)
+            else: st.session_state.df = pd.read_excel(file)
+            st.success("Data Loaded")
+    
+    elif upload_method == "Connect QuickBooks":
+        if "qb_token" not in st.session_state:
+            auth_url = get_qb_auth_url()
+            st.markdown(f"[Click to Connect QB]({auth_url})")
+            auth_code = st.text_input("Paste Code from URL")
+            if st.button("Authorize"):
+                tokens = get_qb_tokens(auth_code)
+                st.session_state["qb_token"] = tokens["access_token"]
+                st.session_state["qb_company"] = tokens["realmId"]
+                st.rerun()
         else:
-            st.warning("No number columns found")
+            st.success("QB Connected")
+            if st.button("Pull 12 Months Data"):
+                st.session_state.df = fetch_qb_transactions(st.session_state["qb_token"], st.session_state["qb_company"])
 
-    # TAB 3: MONEY LEAKS - WE KEPT THIS
-    with tab3:
-        st.subheader("💸 WHERE IS MONEY DISAPPEARING?")
-        if 'Sales' in df.columns and 'Expenses' in df.columns:
-            df['Loss_Rate'] = (df['Expenses'] / df['Sales']) * 100
-            worst = df.nlargest(5, 'Loss_Rate')
-            st.warning("**Top 5 Worst Loss Rate Transactions:**")
-            st.dataframe(worst, use_container_width=True)
-            st.metric("Total Expenses", f"{df['Expenses'].sum():,.2f}")
-        elif numeric_cols:
-            st.info("Analyzing biggest expense column")
-            st.dataframe(df.nlargest(5, numeric_cols[-1]), use_container_width=True)
+    elif upload_method == "Upload Money Image":  # 4 spaces
+        file = st.file_uploader("Upload Money Image", type=["jpg", "jpeg", "png"])  # 8 spaces
+        
+        if file:  # 8 spaces - THIS is inside the elif now
+            from PIL import Image
+            import numpy as np
+            
+            image = Image.open(file)
+            st.image(image, caption="Uploaded Image", use_column_width=True)
+            
+            # TODO: Add your IRIS model here
+            # img_array = np.array(image.resize((224,224)))
+            # prediction = iris_model.predict(img_array)
+            # st.success(f"IRIS Prediction: {prediction}")
+            
+            st.success("Image Loaded! Now add your model prediction code here")
 
-    # TAB 4: DUPLICATES
-    with tab4:
-        st.subheader("🚨 1. DUPLICATE INVOICES")
-        if all(col in df.columns for col in ['Invoice#', 'Vendor', 'Amount']):
-            duplicates = df[df.duplicated(subset=['Invoice#', 'Vendor', 'Amount'], keep=False)]
-            if not duplicates.empty:
-                st.error(f"FOUND {len(duplicates)} DUPLICATE ROWS! Risk: ${duplicates['Amount'].sum():,.2f}")
-                st.dataframe(duplicates, use_container_width=True)
-            else:
-                st.success("No duplicate invoices")
-        else:
-            st.warning("Need columns: Invoice#, Vendor, Amount")
+    st.divider()
+    if st.button("RUN FULL LEAKAGE SCAN", type="primary", use_container_width=True):
+        with st.spinner("Running 4 AI Engines..."):
+            df = st.session_state.df
+            dup = run_duplicate_engine(df)
+            price = run_price_engine(df)
+            saas = run_saas_engine(df)
+            off = run_offcontract_engine(df)
+            st.session_state.results = {"Duplicates": dup, "Price Variance": price, "SaaS Waste": saas, "Off-Contract": off}
+            st.success("Scan Complete")
 
-    # TAB 5: OVER CONTRACT
-    with tab5:
-        st.subheader("💸 2. PAYING ABOVE CONTRACT PRICE")
-        if 'Contract_Price' in df.columns and 'Amount' in df.columns:
-            df['Overpay'] = df['Amount'] - df['Contract_Price']
-            overpay = df[df['Overpay'] > 0]
-            if not overpay.empty:
-                st.error(f"OVERPAID ${overpay['Overpay'].sum():,.2f} TOTAL")
-                st.dataframe(overpay, use_container_width=True)
-            else:
-                st.success("No over-contract payments")
-        else:
-            st.warning("Need columns: Contract_Price, Amount")
+if st.session_state.results:
+    st.header("2. Leakage Dashboard")
+    total_leakage = sum([r['savings'].sum() for r in st.session_state.results.values()])
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("TOTAL LEAKAGE FOUND", f"${total_leakage:,.0f}")
+    c2.metric("Duplicate Payments", f"${st.session_state.results['Duplicates']['savings'].sum():,.0f}")
+    c3.metric("Price Variance", f"${st.session_state.results['Price Variance']['savings'].sum():,.0f}")
+    c4.metric("SaaS + Off-Contract", f"${st.session_state.results['SaaS Waste']['savings'].sum() + st.session_state.results['Off-Contract']['savings'].sum():,.0f}")
 
-    # TAB 6: ZOMBIE + OFF CONTRACT
-    with tab6:
-        st.subheader("🧟 3. ZOMBIE SAAS")
-        if 'Last_Login_Date' in df.columns:
-            cutoff = datetime.now() - pd.DateOffset(days=90)
-            zombies = df[df['Last_Login_Date'] < cutoff]
-            if not zombies.empty:
-                st.error(f"{len(zombies)} ZOMBIE TOOLS! Wasting: ${zombies['Amount'].sum():,.2f}")
-                st.dataframe(zombies, use_container_width=True)
+    for name, res in st.session_state.results.items():
+        with st.expander(f"{name} - ${res['savings'].sum():,.0f} Found"):
+            st.dataframe(res['data'], use_container_width=True)
+            st.download_button(f"Download {name} CSV", res['data'].to_csv(), f"{name}.csv")
 
-        st.subheader("📑 4. OFF-CONTRACT SPEND")
-        if 'Contract_Status' in df.columns:
-            off = df[df['Contract_Status'].str.contains('No Contract', case=False, na=False)]
-            if not off.empty:
-                st.error(f"OFF-CONTRACT SPEND: ${off['Amount'].sum():,.2f}")
-                st.dataframe(off, use_container_width=True)
-
-else:
-    st.info("Upload file to start 👈")
-
-conn.close()
+    st.divider()
+    if st.button("Generate PE Board PDF Report", type="primary"):
+        pdf_path = generate_pdf_report(total_leakage, st.session_state.results)
+        with open(pdf_path, "rb") as f:
+            st.download_button("Download Board Report", f, "IRIS_PRO_Report.pdf")
