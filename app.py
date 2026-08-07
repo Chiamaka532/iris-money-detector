@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from engines import find_leaks, find_duplicate_vendors, price_benchmark
+from engines import find_leaks, find_duplicate_vendors, price_benchmark, contract_renewal_risk
 
 # --- LOGIN PAGE ---
 def check_password():
