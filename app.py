@@ -18,7 +18,7 @@ with st.sidebar:
     st.header("1. Data Intake")
     upload_method = st.selectbox("Upload Method", ["Demo Mode", "Upload Money Image", "Upload Excel/CSV/Zip", "Connect QuickBooks"])
 
-    df = st.session_state.df # start with current df
+    df = st.session_state.df
 
     if upload_method == "Demo Mode":
         st.info("Using sample data")
@@ -36,23 +36,13 @@ with st.sidebar:
                 # AUTO-FIX COLUMNS
                 df.columns = df.columns.str.strip().str.lower()
                 df = df.rename(columns={
-                    'date': 'Date',
-                    'invoice date': 'Date',
-                    'vendor': 'Vendor_Name',
-                    'vendor_name': 'Vendor_Name',
-                    'supplier': 'Vendor_Name',
-                    'amount': 'Amount',
-                    'total': 'Amount',
-                    'total amount': 'Amount',
-                    'cost': 'Amount',
-                    'category': 'Category',
-                    'class': 'Category',
-                    'department': 'Category',
-                    'contract id': 'Contract_ID',
-                    'contract_id': 'Contract_ID'
+                    'date': 'Date', 'invoice date': 'Date',
+                    'vendor': 'Vendor_Name', 'vendor_name': 'Vendor_Name', 'supplier': 'Vendor_Name',
+                    'amount': 'Amount', 'total': 'Amount', 'total amount': 'Amount', 'cost': 'Amount',
+                    'category': 'Category', 'class': 'Category', 'department': 'Category',
+                    'contract id': 'Contract_ID', 'contract_id': 'Contract_ID'
                 })
 
-                # Add missing columns with defaults
                 for col in ['Date', 'Vendor_Name', 'Amount', 'Category']:
                     if col not in df.columns:
                         df[col] = "" if col!= 'Amount' else 0
@@ -60,7 +50,6 @@ with st.sidebar:
                     df['Contract_ID'] = ""
 
                 st.success(f"✅ Data Loaded: {len(df)} rows")
-                st.write("Columns:", df.columns.tolist())
 
             except Exception as e:
                 st.error(f"❌ Error loading file: {e}")
@@ -86,9 +75,8 @@ with st.sidebar:
             from PIL import Image
             image = Image.open(file)
             st.image(image, caption="Uploaded Image", width='stretch')
-            st.success("Image Loaded! Now add your model prediction code here")
 
-    st.session_state.df = df # save at the end
+    st.session_state.df = df
 
     st.divider()
     if st.button("RUN FULL LEAKAGE SCAN", type="primary", width='stretch'):
@@ -102,26 +90,39 @@ with st.sidebar:
                     saas = run_saas_engine(df)
                     off = run_offcontract_engine(df)
                     st.session_state.results = {"Duplicates": dup, "Price Variance": price, "SaaS Waste": saas, "Off-Contract": off}
-                    st.success("Scan Complete")
+                    st.rerun() # <-- THIS IS THE MAIN THING. Forces dashboard to reload
                 except Exception as e:
                     st.error(f"Engine error: {e}")
 
-if st.session_state.results:
+# ========== THIS IS THE MAIN DASHBOARD SECTION ==========
+if st.session_state.results is not None:
     st.header("2. Leakage Dashboard")
-    total_leakage = sum([r['savings'].sum() for r in st.session_state.results.values()])
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("TOTAL LEAKAGE FOUND", f"${total_leakage:,.0f}")
-    c2.metric("Duplicate Payments", f"${st.session_state.results['Duplicates']['savings'].sum():,.0f}")
-    c3.metric("Price Variance", f"${st.session_state.results['Price Variance']['savings'].sum():,.0f}")
-    c4.metric("SaaS + Off-Contract", f"${st.session_state.results['SaaS Waste']['savings'].sum() + st.session_state.results['Off-Contract']['savings'].sum():,.0f}")
+    
+    try:
+        total_leakage = sum([r['savings'].sum() for r in st.session_state.results.values()])
+        
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("TOTAL LEAKAGE FOUND", f"${total_leakage:,.0f}")
+        c2.metric("Duplicate Payments", f"${st.session_state.results['Duplicates']['savings'].sum():,.0f}")
+        c3.metric("Price Variance", f"${st.session_state.results['Price Variance']['savings'].sum():,.0f}")
+        c4.metric("SaaS + Off-Contract", f"${st.session_state.results['SaaS Waste']['savings'].sum() + st.session_state.results['Off-Contract']['savings'].sum():,.0f}")
 
-    for name, res in st.session_state.results.items():
-        with st.expander(f"{name} - ${res['savings'].sum():,.0f} Found"):
-            st.dataframe(res['data'], width='stretch')
-            st.download_button(f"Download {name} CSV", res['data'].to_csv(), f"{name}.csv")
+        for name, res in st.session_state.results.items():
+            if len(res['data']) > 0:
+                with st.expander(f"**{name}** - ${res['savings'].sum():,.0f} Found - {len(res['data'])} rows"):
+                    st.dataframe(res['data'], width='stretch')
+                    st.download_button(f"Download {name} CSV", res['data'].to_csv(index=False), f"{name}.csv")
+            else:
+                st.info(f"{name}: $0 found")
 
-    st.divider()
-    if st.button("Generate PE Board PDF Report", type="primary"):
-        pdf_path = generate_pdf_report(total_leakage, st.session_state.results)
-        with open(pdf_path, "rb") as f:
-            st.download_button("Download Board Report", f, "IRIS_PRO_Report.pdf")
+        st.divider()
+        if st.button("Generate PE Board PDF Report", type="primary"):
+            pdf_path = generate_pdf_report(total_leakage, st.session_state.results)
+            with open(pdf_path, "rb") as f:
+                st.download_button("Download Board Report", f, "IRIS_PRO_Report.pdf")
+    
+    except Exception as e:
+        st.error(f"Error displaying results: {e}")
+
+else:
+    st.info("Upload data and click 'RUN FULL LEAKAGE SCAN' to see results here")
