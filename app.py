@@ -98,18 +98,23 @@ with st.sidebar:
 if st.session_state.results is not None:
     st.header("2. Leakage Dashboard")
     
-    try:
-        total_leakage = sum([r['savings'].sum() for r in st.session_state.results.values()])
+    try: # <-- YOU WERE MISSING THIS
+        dup_sav = float(st.session_state.results['Duplicates']['savings'].sum())
+        price_sav = float(st.session_state.results['Price Variance']['savings'].sum())
+        saas_sav = float(st.session_state.results['SaaS Waste']['savings'].sum())
+        off_sav = float(st.session_state.results['Off-Contract']['savings'].sum())
+        total_leakage = dup_sav + price_sav + saas_sav + off_sav
         
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("TOTAL LEAKAGE FOUND", f"${total_leakage:,.0f}")
-        c2.metric("Duplicate Payments", f"${st.session_state.results['Duplicates']['savings'].sum():,.0f}")
-        c3.metric("Price Variance", f"${st.session_state.results['Price Variance']['savings'].sum():,.0f}")
-        c4.metric("SaaS + Off-Contract", f"${st.session_state.results['SaaS Waste']['savings'].sum() + st.session_state.results['Off-Contract']['savings'].sum():,.0f}")
+        c2.metric("Duplicate Payments", f"${dup_sav:,.0f}")
+        c3.metric("Price Variance", f"${price_sav:,.0f}")
+        c4.metric("SaaS + Off-Contract", f"${saas_sav + off_sav:,.0f}")
 
         for name, res in st.session_state.results.items():
             if len(res['data']) > 0:
-                with st.expander(f"**{name}** - ${res['savings'].sum():,.0f} Found - {len(res['data'])} rows"):
+                sav = float(res['savings'].sum())
+                with st.expander(f"**{name}** - ${sav:,.0f} Found - {len(res['data'])} rows"):
                     st.dataframe(res['data'], width='stretch')
                     st.download_button(f"Download {name} CSV", res['data'].to_csv(index=False), f"{name}.csv")
             else:
@@ -121,7 +126,7 @@ if st.session_state.results is not None:
             with open(pdf_path, "rb") as f:
                 st.download_button("Download Board Report", f, "IRIS_PRO_Report.pdf")
     
-    except Exception as e:
+    except Exception as e: # <-- NOW THIS MATCHES THE TRY ABOVE
         st.error(f"Error displaying results: {e}")
 
 else:
