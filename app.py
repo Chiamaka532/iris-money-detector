@@ -20,6 +20,7 @@ if 'results' not in st.session_state:
 
 with st.sidebar:
     st.header("1. Data Intake")
+    file = None  #
     upload_method = st.selectbox("Upload Method", ["Demo Mode", "Upload Money Image", "Upload Excel/CSV/Zip", "Connect QuickBooks"])
 
     if upload_method == "Demo Mode":
