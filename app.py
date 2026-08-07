@@ -50,6 +50,7 @@ if uploaded_file is not None:
             results = find_leaks(df)
             dupes = find_duplicate_vendors(df)
             benchmark = price_benchmark(df)
+            renewals = contract_renewal_risk(df) # ADD THIS LINE
         
         # KPI ROW
         st.header("Executive Summary")
@@ -61,8 +62,8 @@ if uploaded_file is not None:
         
         st.divider()
         
-        # TABS
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Leakage", "🔁 Duplicates", "💲 Price Benchmark", "🏢 Vendors"])
+        # TABS - NOW 7 TABS
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Leakage", "🔁 Duplicates", "💲 Price Benchmark", "🏢 Vendors", "👤 Maverick", "🔄 Recurring", "📅 Renewals"])
         
         with tab1:
             fig_pie = px.pie(names=['Clean Spend', 'Shadow IT', 'Contract Leakage'], 
@@ -85,5 +86,23 @@ if uploaded_file is not None:
             st.subheader("Top 10 Vendors by Spend")
             fig_bar = px.bar(results['top_vendors'].head(10), x=results['top_vendors'].head(10).index, y=results['top_vendors'].head(10).values)
             st.plotly_chart(fig_bar, use_container_width=True)
+
+        with tab5:
+            st.header("👤 Maverick Spend by Department")
+            st.warning("Who is bypassing procurement the most?")
+            st.bar_chart(results['maverick_by_dept'])
+            st.dataframe(results['maverick_by_dept'])
+
+        with tab6:
+            st.header("🔄 Recurring Subscription Leak")
+            st.error("These are charged every month. Cancel candidates.")
+            st.dataframe(results['recurring_leak'])
+            
+        with tab7:
+            st.header("📅 Contract Renewal Risk - Next 60 Days")
+            if len(renewals) > 0:
+                st.dataframe(renewals)
+            else:
+                st.success("No contracts renewing in 60 days")
 else:
     st.info("👈 Upload CSV in sidebar to start. Password: IRIS2026")
