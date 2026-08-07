@@ -1,53 +1,34 @@
 import pandas as pd
+import numpy as np
 
-def _empty_result():
-    return {'data': pd.DataFrame(), 'savings': pd.Series(dtype='float64')}
-
-def run_duplicate_engine(df):
-    if df.empty: return _empty_result()
-    df = df.copy()
-    df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
-    dup_mask = df.duplicated(subset=['Vendor_Name', 'Amount', 'Date'], keep=False)
-    dupes = df[dup_mask].copy()
-    if len(dupes) > 0:
-        dupes['savings'] = dupes['Amount']
-        dupes['reason'] = 'Duplicate Payment'
-        return {'data': dupes, 'savings': dupes['savings']}
-    return _empty_result()
-
-def run_price_engine(df):
-    if df.empty: return _empty_result()
-    df = df.copy()
-    df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
-    df = df.sort_values(['Vendor_Name', 'Date'])
-    df['prev_amount'] = df.groupby('Vendor_Name')['Amount'].shift(1)
-    df['pct_change'] = (df['Amount'] - df['prev_amount']) / df['prev_amount'].replace(0, 1)
-    spikes = df[df['pct_change'] > 0.10].copy()
-    if len(spikes) > 0:
-        spikes['savings'] = spikes['Amount'] - spikes['prev_amount'].fillna(0)
-        spikes['reason'] = 'Price Spike >10%'
-        return {'data': spikes, 'savings': spikes['savings']}
-    return _empty_result()
-
-def run_saas_engine(df):
-    if df.empty: return _empty_result()
-    df = df.copy()
-    df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
-    saas_df = df[df['Category'].astype(str).str.contains('SaaS|Software|License|Subscription', case=False, na=False)].copy()
-    if len(saas_df) > 0:
-        saas_df['savings'] = saas_df['Amount'] * 0.25
-        saas_df['reason'] = 'Potential SaaS Consolidation'
-        return {'data': saas_df, 'savings': saas_df['savings']}
-    return _empty_result()
-
-def run_offcontract_engine(df):
-    if df.empty: return _empty_result()
-    df = df.copy()
-    df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
-    # FIX: Check for both empty and "No Contract"
-    off_df = df[(df['Contract_ID'].astype(str).isin(["", "No Contract", "nan"]))].copy()
-    if len(off_df) > 0:
-        off_df['savings'] = off_df['Amount'] * 0.15
-        off_df['reason'] = 'Off-Contract Spend'
-        return {'data': off_df, 'savings': off_df['savings']}
-    return _empty_result()
+def find_leaks(df):
+    results = {}
+    
+    # AUTO-DETECT COLUMNS - this is the fix
+    amount_col = next((col for col in df.columns if 'amount' in col.lower()), 'Amount')
+    date_col = next((col for col in df.columns if 'date' in col.lower()), None)
+    po_col = next((col for col in df.columns if 'po' in col.lower()), 'PO_Number')
+    vendor_col = next((col for col in df.columns if 'vendor' in col.lower()), 'Vendor')
+    contract_col = next((col for col in df.columns if 'contract' in col.lower()), 'Contract_ID')
+    
+    df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce')
+    
+    # 1. DUPLICATE/SHADOW SPEND: No PO Number
+    shadow_spend = df[df[po_col].isna() | (df[po_col] == '')]
+    results['shadow_spend'] = shadow_spend[amount_col].sum()
+    results['shadow_count'] = len(shadow_spend)
+    
+    # 2. CONTRACT LEAKAGE: Has Amount but No Contract
+    contract_leak = df[df[contract_col].isna() | (df[contract_col] == '')]
+    results['contract_leak'] = contract_leak[amount_col].sum()
+    
+    # 3. TOTAL SPEND
+    results['total_spend'] = df[amount_col].sum()
+    
+    # 4. TOP VENDORS
+    results['top_vendors'] = df.groupby(vendor_col)[amount_col].sum().sort_values(ascending=False).head(5)
+    
+    results['df'] = df # return df for charts
+    results['cols'] = {'amount': amount_col, 'date': date_col, 'vendor': vendor_col} # pass columns back
+    
+    return results
