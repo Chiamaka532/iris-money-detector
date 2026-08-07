@@ -93,4 +93,5 @@ if uploaded_file is not None:
         st.write("Please ensure you have columns like: Amount, Vendor, Date, PO_Number")
 else:
     st.info("👈 Upload the `iris_sample_data.csv` in the sidebar to start")
-    st.image("https://via.placeholder.com/800x300.png?text=Upload+CSV+to+See+IRIS+Dashboard", use_column_width=True)
+    st.markdown("### Welcome to IRIS PRO")
+    st.markdown("Upload your AP data to instantly find Shadow IT, Contract Leakage, and Duplicate Spend.")
