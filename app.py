@@ -1,149 +1,96 @@
 import streamlit as st
 import pandas as pd
-from engines import run_duplicate_engine, run_price_engine, run_saas_engine, run_offcontract_engine
-from connectors import get_qb_auth_url, get_qb_tokens, fetch_qb_transactions
-from utils import load_sample_data, generate_pdf_report
+import plotly.express as px
+from engines import find_leaks
 
-st.set_page_config(page_title="IRIS PRO", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="IRIS PRO", page_icon="💰", layout="wide")
 
-st.title("IRIS PRO: PE Spend Leakage Command Center")
-st.caption("Autonomous AI that finds 2-7% of portfolio company spend in 48 hours")
-
-if 'df' not in st.session_state:
-    st.session_state.df = load_sample_data()
-if 'results' not in st.session_state:
-    st.session_state.results = None
+st.title("💰 IRIS PRO: PE Spend Leakage Command Center")
+st.caption("Private Equity Grade Spend Analysis. Find leakage in 60 seconds.")
 
 with st.sidebar:
-    st.header("1. Data Intake")
-    upload_method = st.selectbox("Upload Method", ["Demo Mode", "Upload Money Image", "Upload Excel/CSV/Zip", "Connect QuickBooks"])
-
-    df = st.session_state.df
-
-    if upload_method == "Demo Mode":
-        st.info("Using sample data")
-        df = load_sample_data()
-
-    elif upload_method == "Upload Excel/CSV/Zip":
-        file = st.file_uploader("Drop GL + Vendor + Contract Files", type=['csv', 'xlsx', 'zip'])
-        if file:
-            try:
-                if file.name.endswith('.csv'):
-                    df = pd.read_csv(file)
-                else:
-                    df = pd.read_excel(file)
-
-                # AUTO-FIX COLUMNS
-                df.columns = df.columns.str.strip().str.lower()
-                df = df.rename(columns={
-                    'date': 'Date', 'invoice date': 'Date',
-                    'vendor': 'Vendor_Name', 'vendor_name': 'Vendor_Name', 'supplier': 'Vendor_Name',
-                    'amount': 'Amount', 'total': 'Amount', 'total amount': 'Amount', 'cost': 'Amount',
-                    'category': 'Category', 'class': 'Category', 'department': 'Category',
-                    'contract id': 'Contract_ID', 'contract_id': 'Contract_ID'
-                })
-
-                # NUKE: FORCE TYPES. THIS IS THE FIX FOR $0
-                df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
-                df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-                df['Vendor_Name'] = df['Vendor_Name'].astype(str).fillna("Unknown")
-                df['Category'] = df['Category'].astype(str).fillna("Other")
-                df['Contract_ID'] = df['Contract_ID'].astype(str).fillna("No Contract")
-
-                # Add missing columns if they really dont exist
-                required_cols = ['Date', 'Vendor_Name', 'Amount', 'Category', 'Contract_ID']
-                for col in required_cols:
-                    if col not in df.columns:
-                        if col == 'Amount':
-                            df[col] = 0
-                        elif col == 'Date':
-                            df[col] = pd.Timestamp('today')
-                        elif col == 'Category':
-                            df[col] = "Other"
-                        elif col == 'Contract_ID':
-                            df[col] = "No Contract"
-                        else: # Vendor_Name
-                            df[col] = "Unknown"
-
-                st.success(f"✅ Data Loaded: {len(df)} rows | Columns: {list(df.columns)} | Amount dtype: {df['Amount'].dtype}")
-
-            except Exception as e:
-                st.error(f"❌ Error loading file: {e}")
-
-    elif upload_method == "Connect QuickBooks":
-        if "qb_token" not in st.session_state:
-            auth_url = get_qb_auth_url()
-            st.markdown(f"[Click to Connect QB]({auth_url})")
-            auth_code = st.text_input("Paste Code from URL")
-            if st.button("Authorize"):
-                tokens = get_qb_tokens(auth_code)
-                st.session_state["qb_token"] = tokens["access_token"]
-                st.session_state["qb_company"] = tokens["realmId"]
-                st.rerun()
-        else:
-            st.success("QB Connected")
-            if st.button("Pull 12 Months Data"):
-                df = fetch_qb_transactions(st.session_state["qb_token"], st.session_state["qb_company"])
-
-    elif upload_method == "Upload Money Image":
-        file = st.file_uploader("Upload Money Image", type=["jpg", "jpeg", "png"])
-        if file:
-            from PIL import Image
-            image = Image.open(file)
-            st.image(image, caption="Uploaded Image", use_container_width=True)
-
-    st.session_state.df = df
-
-    st.divider()
-    if st.button("RUN FULL LEAKAGE SCAN", type="primary", use_container_width=True):
-        if df.empty:
-            st.warning("Please upload data or select Demo Mode first")
-        else:
-            with st.spinner("Running 4 AI Engines..."):
-                try:
-                    dup = run_duplicate_engine(df)
-                    price = run_price_engine(df)
-                    saas = run_saas_engine(df)
-                    off = run_offcontract_engine(df)
-                    st.session_state.results = {"Duplicates": dup, "Price Variance": price, "SaaS Waste": saas, "Off-Contract": off}
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Engine error: {e}")
-
-# ========== THIS IS THE MAIN DASHBOARD SECTION ==========
-if st.session_state.results is not None:
-    st.header("2. Leakage Dashboard")
+    st.header("⚙️ Controls")
+    st.info("Upload your AP, P-Card, or Procurement CSV")
+    uploaded_file = st.file_uploader("Upload Spend File", type=["csv"])
     
+    if uploaded_file:
+        st.success("File Loaded")
+
+if uploaded_file is not None:
     try:
-        dup_sav = float(st.session_state.results['Duplicates']['savings'].sum())
-        price_sav = float(st.session_state.results['Price Variance']['savings'].sum())
-        saas_sav = float(st.session_state.results['SaaS Waste']['savings'].sum())
-        off_sav = float(st.session_state.results['Off-Contract']['savings'].sum())
-        total_leakage = dup_sav + price_sav + saas_sav + off_sav
+        df = pd.read_csv(uploaded_file)
+        df.columns = df.columns.str.strip() # remove spaces
         
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("TOTAL LEAKAGE FOUND", f"${total_leakage:,.0f}")
-        c2.metric("Duplicate Payments", f"${dup_sav:,.0f}")
-        c3.metric("Price Variance", f"${price_sav:,.0f}")
-        c4.metric("SaaS + Off-Contract", f"${saas_sav + off_sav:,.0f}")
+        # AUTO-DETECT COLUMNS
+        amount_col = next((col for col in df.columns if 'amount' in col.lower()), None)
+        date_col = next((col for col in df.columns if 'date' in col.lower()), None)
+        po_col = next((col for col in df.columns if 'po' in col.lower()), None)
+        vendor_col = next((col for col in df.columns if 'vendor' in col.lower()), None)
+        contract_col = next((col for col in df.columns if 'contract' in col.lower()), None)
+        dept_col = next((col for col in df.columns if 'dept' in col.lower() or 'department' in col.lower()), None)
+        
+        if amount_col is None:
+            st.error("Could not find an 'Amount' column. Please rename one column to include 'Amount'")
+            st.stop()
+            
+        df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce')
+        if date_col: df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
 
-        for name, res in st.session_state.results.items():
-            if len(res['data']) > 0:
-                sav = float(res['savings'].sum())
-                with st.expander(f"**{name}** - ${sav:,.0f} Found - {len(res['data'])} rows"):
-                    st.dataframe(res['data'], use_container_width=True)
-                    st.download_button(f"Download {name} CSV", res['data'].to_csv(index=False), f"{name}.csv")
-            else:
-                st.info(f"{name}: $0 found")
-
-        st.divider()
-        if st.button("Generate PE Board PDF Report", type="primary"):
-            pdf_path = generate_pdf_report(total_leakage, st.session_state.results)
-            with open(pdf_path, "rb") as f:
-                st.download_button("Download Board Report", f, "IRIS_PRO_Report.pdf")
-    
+        if st.button("🔍 RUN FULL LEAKAGE SCAN", type="primary", use_container_width=True):
+            with st.spinner("IRIS AI is scanning 12 leakage patterns..."):
+                results = find_leaks(df)
+            
+            cols = results['cols']
+            
+            # KPI ROW
+            st.header("Executive Summary")
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Total Spend", f"${results['total_spend']:,.2f}")
+            k2.metric("Shadow IT Spend", f"${results['shadow_spend']:,.2f}", f"{results['shadow_count']} Transactions")
+            k3.metric("Contract Leakage", f"${results['contract_leak']:,.2f}")
+            total_leak = results['shadow_spend'] + results['contract_leak']
+            k4.metric("Total Leakage Found", f"${total_leak:,.2f}", f"{total_leak/results['total_spend']*100:.1f}% of Spend")
+            
+            st.divider()
+            
+            # CHARTS
+            tab1, tab2, tab3 = st.tabs(["📊 Leakage Breakdown", "🏢 By Vendor", "📅 By Month"])
+            
+            with tab1:
+                fig_pie = px.pie(names=['Clean Spend', 'Shadow IT', 'Contract Leakage'], 
+                                 values=[results['total_spend']-total_leak, results['shadow_spend'], results['contract_leak']],
+                                 title="Where is the leakage?")
+                st.plotly_chart(fig_pie, use_container_width=True)
+            
+            with tab2:
+                st.subheader("Top 10 Vendors by Spend")
+                fig_bar = px.bar(results['top_vendors'].head(10), 
+                                 x=results['top_vendors'].head(10).index, 
+                                 y=results['top_vendors'].head(10).values,
+                                 labels={'x': 'Vendor', 'y': 'Total Spend'})
+                st.plotly_chart(fig_bar, use_container_width=True)
+            
+            with tab3:
+                if date_col:
+                    monthly = df.groupby(df[date_col].dt.to_period("M"))[amount_col].sum()
+                    st.line_chart(monthly)
+                else:
+                    st.warning("No Date column found to show trends")
+            
+            st.divider()
+            
+            # DRILL DOWN TABLE
+            st.header("🔎 Drill Down: Leakage Transactions")
+            leak_df = pd.concat([results['shadow_df'], results['contract_df']]).drop_duplicates()
+            st.dataframe(leak_df, use_container_width=True)
+            
+            csv = leak_df.to_csv(index=False).encode('utf-8')
+            st.download_button("Download Leakage Report as CSV", csv, "IRIS_Leakage_Report.csv", "text/csv")
+            
     except Exception as e:
-        st.error(f"Error displaying results: {e}")
-
+        st.error(f"Engine error: {e}")
+        st.write("**Columns found in your file:**", df.columns.tolist())
+        st.write("Please ensure you have columns like: Amount, Vendor, Date, PO_Number")
 else:
-    st.info("Upload data and click 'RUN FULL LEAKAGE SCAN' to see results here")
+    st.info("👈 Upload the `iris_sample_data.csv` in the sidebar to start")
+    st.image("https://via.placeholder.com/800x300.png?text=Upload+CSV+to+See+IRIS+Dashboard", use_column_width=True)
