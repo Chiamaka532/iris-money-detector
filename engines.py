@@ -14,18 +14,12 @@ def find_leaks(df):
     
     df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
     
-    # 1. SHADOW SPEND
     shadow_df = df[df[po_col].isna() | (df[po_col] == '')]
-    
-    # 2. CONTRACT LEAKAGE
     contract_df = df[df[contract_col].isna() | (df[contract_col] == '')]
-    
-    # 3. MAVERICK SPEND: Who buys without PO, by Department
     maverick_by_dept = shadow_df.groupby(dept_col)[amount_col].sum().sort_values(ascending=False)
     
-    # 4. RECURRING LEAK: Same Vendor + Amount every month
     recurring = df.groupby([vendor_col, amount_col]).size().reset_index(name='Months')
-    recurring_leak = recurring[recurring['Months'] >= 3] # 3+ months = subscription
+    recurring_leak = recurring[recurring['Months'] >= 3]
     
     results['shadow_spend'] = shadow_df[amount_col].sum()
     results['contract_leak'] = contract_df[amount_col].sum()
@@ -54,7 +48,7 @@ def price_benchmark(df):
     return overpriced[['Vendor', 'Amount', 'Benchmark_Price', 'Variance_%']]
 
 def contract_renewal_risk(df):
-    # Flags contracts expiring in 60 days
+    # THIS IS THE FUNCTION THAT WAS MISSING
     df['Contract_End_Date'] = pd.to_datetime(df.get('Contract_End_Date'), errors='coerce')
     sixty_days = datetime.now() + timedelta(days=60)
     at_risk = df[(df['Contract_End_Date'] <= sixty_days) & (df['Contract_End_Date'] >= datetime.now())]
