@@ -53,9 +53,18 @@ with st.sidebar:
                 # Add missing columns if they really dont exist
                 for col in ['Date', 'Vendor_Name', 'Amount', 'Category', 'Contract_ID']:
                     if col not in df.columns:
-                        df[col] = 0 if col == 'Amount' else ""
+                        if col == 'Amount':
+                            df[col] = 0
+                        elif col == 'Date':
+                            df[col] = pd.Timestamp('today')
+                        elif col == 'Category':
+                            df[col] = "Other"
+                        elif col == 'Contract_ID':
+                            df[col] = "No Contract"
+                        else: # Vendor_Name
+                            df[col] = "Unknown"
 
-                st.success(f"✅ Data Loaded: {len(df)} rows | Amount dtype: {df['Amount'].dtype}")
+                st.success(f"✅ Data Loaded: {len(df)} rows | Columns: {list(df.columns)} | Amount dtype: {df['Amount'].dtype}")
 
             except Exception as e:
                 st.error(f"❌ Error loading file: {e}")
