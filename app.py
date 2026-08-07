@@ -25,40 +25,40 @@ with st.sidebar:
         df = load_sample_data()
 
     elif upload_method == "Upload Excel/CSV/Zip":
-     file = st.file_uploader("Drop GL + Vendor + Contract Files", type=['csv', 'xlsx', 'zip'])
-    if file: # <-- This MUST be indented under the line above
-        try:
-            if file.name.endswith('.csv'):
-                df = pd.read_csv(file)
-            else:
-                df = pd.read_excel(file)
+        file = st.file_uploader("Drop GL + Vendor + Contract Files", type=['csv', 'xlsx', 'zip'])
+        if file:
+            try:
+                if file.name.endswith('.csv'):
+                    df = pd.read_csv(file)
+                else:
+                    df = pd.read_excel(file)
 
-            # AUTO-FIX COLUMNS
-            df.columns = df.columns.str.strip().str.lower()
-            df = df.rename(columns={
-                'date': 'Date', 'invoice date': 'Date',
-                'vendor': 'Vendor_Name', 'vendor_name': 'Vendor_Name', 'supplier': 'Vendor_Name',
-                'amount': 'Amount', 'total': 'Amount', 'total amount': 'Amount', 'cost': 'Amount',
-                'category': 'Category', 'class': 'Category', 'department': 'Category',
-                'contract id': 'Contract_ID', 'contract_id': 'Contract_ID'
-            })
+                # AUTO-FIX COLUMNS
+                df.columns = df.columns.str.strip().str.lower()
+                df = df.rename(columns={
+                    'date': 'Date', 'invoice date': 'Date',
+                    'vendor': 'Vendor_Name', 'vendor_name': 'Vendor_Name', 'supplier': 'Vendor_Name',
+                    'amount': 'Amount', 'total': 'Amount', 'total amount': 'Amount', 'cost': 'Amount',
+                    'category': 'Category', 'class': 'Category', 'department': 'Category',
+                    'contract id': 'Contract_ID', 'contract_id': 'Contract_ID'
+                })
 
-            # NUKE: FORCE TYPES. THIS IS THE FIX
-            df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-            df['Vendor_Name'] = df['Vendor_Name'].astype(str).fillna("Unknown")
-            df['Category'] = df['Category'].astype(str).fillna("Other")
-            df['Contract_ID'] = df['Contract_ID'].astype(str).fillna("")
+                # NUKE: FORCE TYPES. THIS IS THE FIX FOR $0
+                df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
+                df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+                df['Vendor_Name'] = df['Vendor_Name'].astype(str).fillna("Unknown")
+                df['Category'] = df['Category'].astype(str).fillna("Other")
+                df['Contract_ID'] = df['Contract_ID'].astype(str).fillna("")
 
-            # Add missing columns if they really dont exist
-            for col in ['Date', 'Vendor_Name', 'Amount', 'Category', 'Contract_ID']:
-                if col not in df.columns:
-                    df[col] = 0 if col == 'Amount' else ""
+                # Add missing columns if they really dont exist
+                for col in ['Date', 'Vendor_Name', 'Amount', 'Category', 'Contract_ID']:
+                    if col not in df.columns:
+                        df[col] = 0 if col == 'Amount' else ""
 
-            st.success(f"✅ Data Loaded: {len(df)} rows | Amount is now: {df['Amount'].dtype}")
+                st.success(f"✅ Data Loaded: {len(df)} rows | Amount dtype: {df['Amount'].dtype}")
 
-        except Exception as e:
-            st.error(f"❌ Error loading file: {e}")
+            except Exception as e:
+                st.error(f"❌ Error loading file: {e}")
 
     elif upload_method == "Connect QuickBooks":
         if "qb_token" not in st.session_state:
@@ -80,12 +80,12 @@ with st.sidebar:
         if file:
             from PIL import Image
             image = Image.open(file)
-            st.image(image, caption="Uploaded Image", width='stretch')
+            st.image(image, caption="Uploaded Image", use_container_width=True)
 
     st.session_state.df = df
 
     st.divider()
-    if st.button("RUN FULL LEAKAGE SCAN", type="primary", width='stretch'):
+    if st.button("RUN FULL LEAKAGE SCAN", type="primary", use_container_width=True):
         if df.empty:
             st.warning("Please upload data or select Demo Mode first")
         else:
@@ -96,7 +96,7 @@ with st.sidebar:
                     saas = run_saas_engine(df)
                     off = run_offcontract_engine(df)
                     st.session_state.results = {"Duplicates": dup, "Price Variance": price, "SaaS Waste": saas, "Off-Contract": off}
-                    st.rerun() # <-- THIS IS THE MAIN THING. Forces dashboard to reload
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Engine error: {e}")
 
@@ -104,7 +104,7 @@ with st.sidebar:
 if st.session_state.results is not None:
     st.header("2. Leakage Dashboard")
     
-    try: # <-- YOU WERE MISSING THIS
+    try:
         dup_sav = float(st.session_state.results['Duplicates']['savings'].sum())
         price_sav = float(st.session_state.results['Price Variance']['savings'].sum())
         saas_sav = float(st.session_state.results['SaaS Waste']['savings'].sum())
@@ -121,7 +121,7 @@ if st.session_state.results is not None:
             if len(res['data']) > 0:
                 sav = float(res['savings'].sum())
                 with st.expander(f"**{name}** - ${sav:,.0f} Found - {len(res['data'])} rows"):
-                    st.dataframe(res['data'], width='stretch')
+                    st.dataframe(res['data'], use_container_width=True)
                     st.download_button(f"Download {name} CSV", res['data'].to_csv(index=False), f"{name}.csv")
             else:
                 st.info(f"{name}: $0 found")
@@ -132,7 +132,7 @@ if st.session_state.results is not None:
             with open(pdf_path, "rb") as f:
                 st.download_button("Download Board Report", f, "IRIS_PRO_Report.pdf")
     
-    except Exception as e: # <-- NOW THIS MATCHES THE TRY ABOVE
+    except Exception as e:
         st.error(f"Error displaying results: {e}")
 
 else:
