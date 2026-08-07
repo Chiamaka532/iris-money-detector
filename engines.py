@@ -48,7 +48,6 @@ def price_benchmark(df):
     return overpriced[['Vendor', 'Amount', 'Benchmark_Price', 'Variance_%']]
 
 def contract_renewal_risk(df):
-    # THIS IS THE FUNCTION THAT WAS MISSING
     df['Contract_End_Date'] = pd.to_datetime(df.get('Contract_End_Date'), errors='coerce')
     sixty_days = datetime.now() + timedelta(days=60)
     at_risk = df[(df['Contract_End_Date'] <= sixty_days) & (df['Contract_End_Date'] >= datetime.now())]
