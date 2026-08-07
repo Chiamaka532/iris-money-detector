@@ -34,7 +34,10 @@ with st.sidebar:
         else: 
             df = pd.read_excel(file)
         
-        # AUTO-FIX COLUMNS
+        # SHOW US WHAT YOU ACTUALLY HAVE
+        st.write("Raw columns from your file:", df.columns.tolist())
+        
+        # AUTO-FIX
         df.columns = df.columns.str.strip().str.lower()
         df = df.rename(columns={
             'date': 'Date',
@@ -43,16 +46,21 @@ with st.sidebar:
             'supplier': 'Vendor_Name',
             'amount': 'Amount',
             'total': 'Amount',
+            'cost': 'Amount',
             'category': 'Category',
-            'class': 'Category'
+            'class': 'Category',
+            'contract id': 'Contract_ID',
+            'contract_id': 'Contract_ID'
         })
         
-        # Add missing columns with defaults so engines don't crash
+        st.write("After rename, columns are:", df.columns.tolist()) # <-- ADD THIS
+        
         if 'Contract_ID' not in df.columns:
             df['Contract_ID'] = ""
-        
+            
         st.session_state.df = df
-        st.success(f"Data Loaded: {len(df)} rows. Columns: {df.columns.tolist()}")
+        st.success(f"Data Loaded: {len(df)} rows")
+        st.stop() # <-- ADD THIS to pause before engines run
     
     elif upload_method == "Connect QuickBooks":
         if "qb_token" not in st.session_state:
