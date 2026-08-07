@@ -48,7 +48,7 @@ with st.sidebar:
                 df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
                 df['Vendor_Name'] = df['Vendor_Name'].astype(str).fillna("Unknown")
                 df['Category'] = df['Category'].astype(str).fillna("Other")
-                df['Contract_ID'] = df['Contract_ID'].astype(str).fillna("")
+                df['Contract_ID'] = df['Contract_ID'].astype(str).fillna("No Contract")
 
                 # Add missing columns if they really dont exist
                 required_cols = ['Date', 'Vendor_Name', 'Amount', 'Category', 'Contract_ID']
