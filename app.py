@@ -26,12 +26,18 @@ with st.sidebar:
         st.info("Using sample data")
 
     elif upload_method == "Upload Excel/CSV/Zip":
-        file = st.file_uploader("Drop GL + Vendor + Contract Files", type=['csv', 'xlsx', 'zip'])
+     file = st.file_uploader("Drop GL + Vendor + Contract Files", type=['csv', 'xlsx', 'zip'])
+    
+    if file: 
+        if file.name.endswith('.csv'): 
+            st.session_state.df = pd.read_csv(file)
+        else: 
+            st.session_state.df = pd.read_excel(file)
+
+        # ADD THIS - fixes KeyError
+        st.session_state.df.columns = st.session_state.df.columns.str.strip()
         
-        if file: 
-            if file.name.endswith('.csv'): st.session_state.df = pd.read_csv(file)
-            else: st.session_state.df = pd.read_excel(file)
-            st.success("Data Loaded")
+        st.success("Data Loaded")
     
     elif upload_method == "Connect QuickBooks":
         if "qb_token" not in st.session_state:
