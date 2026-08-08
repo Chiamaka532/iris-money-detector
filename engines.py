@@ -30,18 +30,26 @@ def find_leaks(df):
     df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce')
     if date_col: df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
 
-    # FIXED: removed the extra dot
     shadow_df = df[df[po_col].isna() | (df[po_col] == '')] if po_col else pd.DataFrame()
     contract_df = df[df[contract_col].isna() | (df[contract_col] == '')] if contract_col else pd.DataFrame()
 
     dup_cols = [c for c in ['Vendor_ID', vendor_col, 'Invoice_Number', 'Invoice', amount_col] if c in df.columns]
     dupes = df[df.duplicated(dup_cols, keep=False)] if len(dup_cols) >= 3 else pd.DataFrame()
 
+    # RECURRING LEAK - ADDED BACK
+    recurring_leak = pd.DataFrame()
+    if date_col:
+        df['Month'] = df[date_col].dt.to_period('M')
+        recurring = df.groupby([vendor_col, amount_col, 'Month']).size().reset_index(name='Count')
+        recurring_leak = recurring.groupby([vendor_col, amount_col]).size().reset_index(name='Months')
+        recurring_leak = recurring_leak[recurring_leak['Months'] >= 2] # 2+ times
+
     maverick_by_dept = shadow_df.groupby(dept_col)[amount_col].sum().sort_values(ascending=False) if dept_col and not shadow_df.empty else pd.Series()
 
     results['shadow_spend'] = safe_sum(shadow_df, amount_col)
     results['contract_leak'] = safe_sum(contract_df, amount_col)
     results['duplicate_payments'] = safe_sum(dupes, amount_col)
+    results['recurring_leak'] = recurring_leak # <-- THIS WAS MISSING
     results['total_spend'] = safe_sum(df, amount_col)
     results['top_vendors'] = df.groupby(vendor_col)[amount_col].sum().sort_values(ascending=False).head(10) if vendor_col else pd.Series()
     results['maverick_by_dept'] = maverick_by_dept
