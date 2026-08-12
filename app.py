@@ -1,122 +1,261 @@
-import streamlit as st
+"""IRIS â€” evidence-led spend leakage analysis.
+
+Run with ``streamlit run app.py``.  The app deliberately keeps uploads in
+memory: a CSV refreshes the analysis immediately and is not written to the
+local SQLite database that the legacy prototype used.
+"""
+
+from __future__ import annotations
+
+from hashlib import sha256
+from pathlib import Path
+from typing import Any
+
 import pandas as pd
-import sqlite3
-import numpy as np
-from datetime import datetime
+import streamlit as st
 
-st.set_page_config(page_title="IRIS Ultimate Detective", layout="wide")
-st.title("🕵️ IRIS - Ultimate Money Detective Pro")
-st.write("Finds: Fraud Spikes, Duplicates, Overpay, Zombie SaaS, Off-Contract, Money Leaks")
+from leakage_analysis import analyze_dataframe, infer_schema, load_csv_bytes
+from ui import ScanProgress, apply_branding, render_dashboard, render_upload_state
 
-st.sidebar.header("Upload Data")
-uploaded_file = st.sidebar.file_uploader("Upload AP/Procurement/Sales CSV or Excel", type=["csv", "xlsx", "xls"])
 
-conn = sqlite3.connect("iris_data.db")
+st.set_page_config(
+    page_title="IRIS | Spend leakage evidence",
+    page_icon="🔎",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+apply_branding()
 
-if uploaded_file is not None:
-    if uploaded_file.name.endswith('.csv'):
-        df = pd.read_csv(uploaded_file)
+
+NO_FIELD = "â€” Not available in this file â€”"
+FIELD_LABELS = {
+    "amount": "Transaction amount *",
+    "vendor": "Vendor / supplier",
+    "invoice": "Invoice or transaction reference",
+    "date": "Transaction / invoice date",
+    "contract_value": "Contracted amount or rate",
+    "quantity": "Quantity / units",
+    "unit_price": "Unit price",
+    "po": "Purchase-order reference",
+    "contract_status": "Contract status",
+    "last_activity": "Last login / activity date",
+    "description": "Description / line item",
+    "category": "Category / department",
+}
+
+
+@st.cache_data(show_spinner=False)
+def _load_upload(payload: bytes) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Parse a file once per content hash; mapping changes do not re-read it."""
+
+    return load_csv_bytes(payload)
+
+
+def _safe_summary(results: Any) -> dict[str, Any]:
+    summary = getattr(results, "summary", None)
+    if isinstance(summary, dict):
+        return summary
+    if isinstance(results, dict):
+        nested = results.get("summary")
+        return nested if isinstance(nested, dict) else results
+    return {}
+
+
+def _as_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if pd.notna(number) else None
+
+
+def _money(value: Any, currency: str) -> str:
+    number = _as_number(value)
+    if number is None:
+        return "Not available"
+    sign = "-" if number < 0 else ""
+    return f"{sign}{currency}{abs(number):,.2f}"
+
+
+def _source_hash(payload: bytes) -> str:
+    return sha256(payload).hexdigest()[:12]
+
+
+def _render_mapping(data: pd.DataFrame, inferred: dict[str, Any], file_key: str) -> dict[str, Any]:
+    """Let an analyst correct inference before IRIS makes a monetary claim."""
+
+    options = [NO_FIELD, *[str(column) for column in data.columns]]
+    mapping: dict[str, Any] = {}
+
+    with st.expander("Review column mapping", expanded=False):
+        st.caption(
+            "IRIS chose the best matches below. Correct any ambiguous field before "
+            "sharing a result; the scan reruns immediately when a mapping changes."
+        )
+        left, right = st.columns(2)
+        for position, (field, label) in enumerate(FIELD_LABELS.items()):
+            default = inferred.get(field)
+            default = default if default in data.columns else NO_FIELD
+            target = left if position % 2 == 0 else right
+            with target:
+                choice = st.selectbox(
+                    label,
+                    options,
+                    index=options.index(default),
+                    key=f"mapping_{file_key}_{field}",
+                )
+            mapping[field] = None if choice == NO_FIELD else choice
+
+        mapping["contract_is_unit_rate"] = st.checkbox(
+            "The contracted value is a per-unit rate (multiply it by Quantity)",
+            value=bool(inferred.get("contract_is_unit_rate", False)),
+            key=f"mapping_{file_key}_contract_rate",
+            help="Leave off when a contract field already contains the expected total invoice amount.",
+        )
+    return mapping
+
+
+def _render_method_note() -> None:
+    st.info(
+        "**How IRIS reports dollars:** confirmed leakage contains only redundant "
+        "duplicate-payment value and billed-over-contract value, with overlaps removed. "
+        "Pricing anomalies and missing-control signals are shown separately as review "
+        "queuesâ€”they are not added to the confirmed total."
+    )
+
+
+def _render_top_metrics(summary: dict[str, Any], currency: str) -> None:
+    spend = summary.get("total_spend")
+    confirmed = summary.get("confirmed_leakage", summary.get("total_leakage"))
+    pricing = summary.get("estimated_pricing_exposure")
+    at_risk = summary.get("at_risk_spend")
+    first, second, third, fourth = st.columns(4)
+    first.metric("Spend analysed", _money(spend, currency))
+    second.metric("Confirmed / quantified leakage", _money(confirmed, currency))
+    third.metric("Estimated pricing exposure", _money(pricing, currency))
+    fourth.metric("Control-risk spend", _money(at_risk, currency))
+    first.caption("Usable monetary rows in this upload")
+    second.caption("Duplicates + contract variance; overlap removed")
+    third.caption("Benchmark candidates; validate before recovery claim")
+    fourth.caption("Policy / inactivity exceptions; not counted as loss")
+
+
+def _normalize_for_dashboard(results: Any, summary: dict[str, Any]) -> Any:
+    """Give the reusable renderer a truthful headline even if the engine evolves."""
+
+    if isinstance(results, dict):
+        display = dict(results)
     else:
-        df = pd.read_excel(uploaded_file)
+        display = {
+            "summary": summary,
+            "findings": getattr(results, "findings", pd.DataFrame()),
+            "source_breakdown": getattr(results, "source_breakdown", pd.DataFrame()),
+            "schema": getattr(results, "schema", {}),
+            "warnings": getattr(results, "warnings", []),
+        }
+    display["total_spend"] = summary.get("total_spend")
+    # The dashboard renderer's generic candidate headline must never add review
+    # exposure to the amount that is safe to describe as quantified leakage.
+    display["total_leakage"] = summary.get("confirmed_leakage", summary.get("total_leakage", 0))
+    return display
 
-    df.columns = [col.strip() for col in df.columns]
-    for col in df.columns:
-        if 'date' in col.lower():
-            df[col] = pd.to_datetime(df[col], errors='coerce')
 
-    df.to_sql("all_data", conn, if_exists='replace', index=False)
-    st.success(f"Loaded: {len(df)} rows")
+def _payload_from_sidebar() -> tuple[bytes | None, str | None]:
+    with st.sidebar:
+        st.header("Live CSV scan")
+        uploaded = st.file_uploader(
+            "Upload a CSV export",
+            type=["csv", "txt"],
+            help="Comma, tab, semicolon, and pipe-delimited CSV exports are supported.",
+        )
+        use_demo = st.button("Open included demo", use_container_width=True)
+        st.divider()
+        currency = st.text_input("Currency symbol", value="$", max_chars=6)
+        inactive_days = st.slider("Inactive-service threshold (days)", 30, 365, 90, 15)
+        price_threshold = st.slider("Pricing outlier threshold", 5, 100, 15, 5) / 100
+        st.caption("The scan runs automatically when the upload or controls change.")
 
-    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    if uploaded is not None:
+        st.session_state["iris_use_demo"] = False
+        return uploaded.getvalue(), uploaded.name
+    if use_demo:
+        st.session_state["iris_use_demo"] = True
+    if st.session_state.get("iris_use_demo"):
+        demo_path = Path(__file__).with_name("demo_portco_leakage.csv")
+        if demo_path.exists():
+            return demo_path.read_bytes(), demo_path.name
+        st.error("The included demo file was not found beside app.py.")
+    return None, None
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Data",
-        "🚨 Fraud & Spikes",
-        "💸 Money Leaks",
-        "1. Duplicate Invoices",
-        "2. Over Contract",
-        "3. Zombie + Off-Contract"
-    ])
 
-    with tab1:
-        st.dataframe(df, use_container_width=True)
+payload, filename = _payload_from_sidebar()
 
-    # TAB 2: FRAUD & SPIKES - WE KEPT THIS
-    with tab2:
-        st.subheader("🚨 FRAUD & PRICE SPIKE DETECTION")
-        if numeric_cols:
-            for col in numeric_cols[:3]:
-                mean = df[col].mean()
-                std = df[col].std()
-                if std > 0:
-                    threshold = mean + 3*std
-                    anomalies = df[df[col] > threshold]
-                    if not anomalies.empty:
-                        st.error(f"**{len(anomalies)} Suspicious Spikes in `{col}`** > 3x normal")
-                        st.dataframe(anomalies, use_container_width=True)
-                    else:
-                        st.success(f"No major spikes in `{col}`")
-        else:
-            st.warning("No number columns found")
+if payload is None:
+    render_upload_state()
+    st.caption(
+        "Uploads are processed in memory for the current session. IRIS does not save "
+        "them to the legacy local database."
+    )
+    st.stop()
 
-    # TAB 3: MONEY LEAKS - WE KEPT THIS
-    with tab3:
-        st.subheader("💸 WHERE IS MONEY DISAPPEARING?")
-        if 'Sales' in df.columns and 'Expenses' in df.columns:
-            df['Loss_Rate'] = (df['Expenses'] / df['Sales']) * 100
-            worst = df.nlargest(5, 'Loss_Rate')
-            st.warning("**Top 5 Worst Loss Rate Transactions:**")
-            st.dataframe(worst, use_container_width=True)
-            st.metric("Total Expenses", f"{df['Expenses'].sum():,.2f}")
-        elif numeric_cols:
-            st.info("Analyzing biggest expense column")
-            st.dataframe(df.nlargest(5, numeric_cols[-1]), use_container_width=True)
+try:
+    data, import_info = _load_upload(payload)
+except Exception as exc:  # The parser provides the recoverable detail where possible.
+    st.error(f"IRIS could not read this file: {exc}")
+    st.stop()
 
-    # TAB 4: DUPLICATES
-    with tab4:
-        st.subheader("🚨 1. DUPLICATE INVOICES")
-        if all(col in df.columns for col in ['Invoice#', 'Vendor', 'Amount']):
-            duplicates = df[df.duplicated(subset=['Invoice#', 'Vendor', 'Amount'], keep=False)]
-            if not duplicates.empty:
-                st.error(f"FOUND {len(duplicates)} DUPLICATE ROWS! Risk: ${duplicates['Amount'].sum():,.2f}")
-                st.dataframe(duplicates, use_container_width=True)
-            else:
-                st.success("No duplicate invoices")
-        else:
-            st.warning("Need columns: Invoice#, Vendor, Amount")
+if data.empty:
+    st.warning("The file has headers but no data rows. Upload a CSV with at least one record.")
+    st.stop()
 
-    # TAB 5: OVER CONTRACT
-    with tab5:
-        st.subheader("💸 2. PAYING ABOVE CONTRACT PRICE")
-        if 'Contract_Price' in df.columns and 'Amount' in df.columns:
-            df['Overpay'] = df['Amount'] - df['Contract_Price']
-            overpay = df[df['Overpay'] > 0]
-            if not overpay.empty:
-                st.error(f"OVERPAID ${overpay['Overpay'].sum():,.2f} TOTAL")
-                st.dataframe(overpay, use_container_width=True)
-            else:
-                st.success("No over-contract payments")
-        else:
-            st.warning("Need columns: Contract_Price, Amount")
+st.markdown('<p class="iris-eyebrow">Live analysis</p>', unsafe_allow_html=True)
+st.title("IRIS spend leakage evidence")
+st.caption(f"Analysing **{filename}** â€¢ {len(data):,} rows â€¢ {len(data.columns):,} columns")
 
-    # TAB 6: ZOMBIE + OFF CONTRACT
-    with tab6:
-        st.subheader("🧟 3. ZOMBIE SAAS")
-        if 'Last_Login_Date' in df.columns:
-            cutoff = datetime.now() - pd.DateOffset(days=90)
-            zombies = df[df['Last_Login_Date'] < cutoff]
-            if not zombies.empty:
-                st.error(f"{len(zombies)} ZOMBIE TOOLS! Wasting: ${zombies['Amount'].sum():,.2f}")
-                st.dataframe(zombies, use_container_width=True)
+inferred = infer_schema(data)
+file_key = _source_hash(payload)
+mapping = _render_mapping(data, inferred, file_key)
+_render_method_note()
 
-        st.subheader("📑 4. OFF-CONTRACT SPEND")
-        if 'Contract_Status' in df.columns:
-            off = df[df['Contract_Status'].str.contains('No Contract', case=False, na=False)]
-            if not off.empty:
-                st.error(f"OFF-CONTRACT SPEND: ${off['Amount'].sum():,.2f}")
-                st.dataframe(off, use_container_width=True)
+# Controls are defined in the sidebar before parsing, so retrieve their values from
+# session state only after Streamlit has registered them.
+currency = st.session_state.get("Currency symbol", "$")
+inactive_days = int(st.session_state.get("Inactive-service threshold (days)", 90))
+price_threshold = float(st.session_state.get("Pricing outlier threshold", 0.15))
 
-else:
-    st.info("Upload file to start 👈")
+progress = ScanProgress("Reading mapped fieldsâ€¦")
+try:
+    results = analyze_dataframe(
+        data,
+        mapping,
+        inactive_days=inactive_days,
+        price_threshold=price_threshold,
+        progress_callback=progress.callback,
+    )
+    progress.complete("Live leakage scan complete")
+except Exception as exc:
+    progress.fail("The file loaded, but the leakage scan could not finish.")
+    st.exception(exc)
+    st.stop()
 
-conn.close()
+summary = _safe_summary(results)
+_render_top_metrics(summary, currency)
+
+# NEW: ENTERPRISE METRICS ROW
+if summary.get("money_leakage") is not None:
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Money Leaking", _money(summary.get("money_leakage"), currency))
+    col2.metric("Overdue Invoices", f"{summary.get('overdue_count', 0):,}")
+    col3.metric("Top 10% Concentration", summary.get("top_10_concentration", "0%"))
+    col4.metric("Avg Health Score", f"{summary.get('avg_health_score', 0):.0f}")
+
+    if summary.get("biggest_risk_customer"):
+        st.warning(f"**Biggest Risk:** {summary['biggest_risk_customer']} - Owned by {summary.get('biggest_risk_owner', 'N/A')}")
+
+st.divider()
+render_dashboard(_normalize_for_dashboard(results, summary), data, show_profile=True)
+
+st.caption(
+    "Live scan complete. Download the source evidence before sharing a result; "
+    "validate candidates against the payment system and governing contract."
+)
